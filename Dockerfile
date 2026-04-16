@@ -1,14 +1,12 @@
-FROM ubuntu:22.04
+FROM node:20-bullseye-slim
 
-# Setup basic curl to install Node.js
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
-
-# Setup Node.js
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-RUN apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
-
-# Setup App
 WORKDIR /app
+
+# Install bash and basic utils just in case needed for runtime setup
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y curl wget unzip zip git bash sudo && \
+    rm -rf /var/lib/apt/lists/*
+
 COPY package*.json ./
 RUN npm install
 
