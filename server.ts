@@ -187,45 +187,62 @@ io.on('connection', (socket) => {
   // Build process
   socket.on('build:start', () => {
     socket.emit('build:log', 'Starting build process...\n');
-    socket.emit('build:log', 'Checking for gradlew...\n');
+    socket.emit('build:log', 'Step 1: Checking/Installing OpenJDK 17...\n');
 
-    const gradlewPath = path.join(activeProjectRoot, 'gradlew');
-    
-    if (!fs.existsSync(gradlewPath)) {
-      socket.emit('build:log', 'Error: gradlew not found in project root.\n');
-      socket.emit('build:log', 'This environment requires a valid Android project with a Gradle wrapper.\n');
-      socket.emit('build:error', 'gradlew not found');
-      return;
-    }
+    const installProcess = spawn('bash', ['-c', 'apt-get update && apt-get install -y openjdk-17-jdk || sudo apt-get update && sudo apt-get install -y openjdk-17-jdk || echo "Warning: Could not install automatically (might need root). Continuing..."'], {
+      cwd: activeProjectRoot,
+      env: process.env
+    });
 
-    socket.emit('build:log', 'Found gradlew. Making it executable...\n');
-    exec(`chmod +x gradlew`, { cwd: activeProjectRoot }, (err) => {
-      if (err) {
-        socket.emit('build:log', `Failed to chmod: ${err.message}\n`);
+    installProcess.stdout.on('data', (data: Buffer) => {
+      socket.emit('build:log', data.toString());
+    });
+
+    installProcess.stderr.on('data', (data: Buffer) => {
+      socket.emit('build:log', data.toString());
+    });
+
+    installProcess.on('close', () => {
+      socket.emit('build:log', '\nJava Setup Phase completed. Proceeding to Gradle Check...\n');
+
+      const gradlewPath = path.join(activeProjectRoot, 'gradlew');
+      
+      if (!fs.existsSync(gradlewPath)) {
+        socket.emit('build:log', 'Error: gradlew not found in project root.\n');
+        socket.emit('build:log', 'This environment requires a valid Android project with a Gradle wrapper.\n');
+        socket.emit('build:error', 'gradlew not found');
+        return;
       }
 
-      socket.emit('build:log', 'Running ./gradlew assembleDebug...\n');
-      const buildProcess = spawn('./gradlew', ['assembleDebug'], {
-        cwd: activeProjectRoot,
-        env: process.env
-      });
-
-      buildProcess.stdout.on('data', (data: Buffer) => {
-        socket.emit('build:log', data.toString());
-      });
-
-      buildProcess.stderr.on('data', (data: Buffer) => {
-        socket.emit('build:log', data.toString());
-      });
-
-      buildProcess.on('close', (code) => {
-        if (code === 0) {
-          socket.emit('build:log', '\nBuild completed successfully! APK is ready.\n');
-          socket.emit('build:success');
-        } else {
-          socket.emit('build:log', `\nBuild failed with exit code ${code}.\n`);
-          socket.emit('build:error', `Exit code ${code}`);
+      socket.emit('build:log', 'Found gradlew. Making it executable...\n');
+      exec(`chmod +x gradlew`, { cwd: activeProjectRoot }, (err) => {
+        if (err) {
+          socket.emit('build:log', `Failed to chmod: ${err.message}\n`);
         }
+
+        socket.emit('build:log', 'Running ./gradlew assembleDebug...\n');
+        const buildProcess = spawn('./gradlew', ['assembleDebug'], {
+          cwd: activeProjectRoot,
+          env: process.env
+        });
+
+        buildProcess.stdout.on('data', (data: Buffer) => {
+          socket.emit('build:log', data.toString());
+        });
+
+        buildProcess.stderr.on('data', (data: Buffer) => {
+          socket.emit('build:log', data.toString());
+        });
+
+        buildProcess.on('close', (code) => {
+          if (code === 0) {
+            socket.emit('build:log', '\nBuild completed successfully! APK is ready.\n');
+            socket.emit('build:success');
+          } else {
+            socket.emit('build:log', `\nBuild failed with exit code ${code}.\n`);
+            socket.emit('build:error', `Exit code ${code}`);
+          }
+        });
       });
     });
   });
