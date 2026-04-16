@@ -1,0 +1,6 @@
+{
+  "name": "Cloud Android Builder",
+  "description": "A cloud-based mobile app builder platform for compiling Android projects via Gradle. Features a web terminal, code editor, and automated build system.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
