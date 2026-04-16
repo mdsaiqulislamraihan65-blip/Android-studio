@@ -186,64 +186,73 @@ io.on('connection', (socket) => {
 
   // Build process
   socket.on('build:start', () => {
-    socket.emit('build:log', 'Starting build process...\n');
-    socket.emit('build:log', 'Step 1: Checking/Installing OpenJDK 17...\n');
+    socket.emit('build:log', 'Starting Android Build Environment Setup...\n');
+    socket.emit('build:log', 'Step 1: Installing Java & Required Tools (Please wait, this will take a few minutes on first run)...\n');
 
-    const installProcess = spawn('bash', ['-c', 'apt-get update && apt-get install -y openjdk-17-jdk || sudo apt-get update && sudo apt-get install -y openjdk-17-jdk || echo "Warning: Could not install automatically (might need root). Continuing..."'], {
+    // Run everything directly in terminal logic
+    const setupScript = `
+      set -e
+      if ! command -v javac &> /dev/null; then
+        echo "Installing OpenJDK 17 and tools..."
+        apt-get update
+        apt-get install -y openjdk-17-jdk wget unzip zip git
+      else
+        echo "Java is already installed."
+      fi
+
+      export ANDROID_HOME=/opt/android-sdk
+      export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
+
+      if [ ! -d "$ANDROID_HOME/cmdline-tools/latest/bin" ]; then
+        echo "Setting up Android SDK..."
+        mkdir -p $ANDROID_HOME/cmdline-tools
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip -O android_tools.zip
+        unzip -q android_tools.zip -d $ANDROID_HOME/cmdline-tools
+        mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest
+        rm android_tools.zip
+        echo "Installing Android SDK Platform & Build Tools..."
+        yes | sdkmanager --licenses
+        sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+      else
+        echo "Android SDK is already setup."
+      fi
+
+      echo "Setting local.properties..."
+      echo "sdk.dir=/opt/android-sdk" > local.properties
+
+      if [ ! -f "gradlew" ]; then
+         echo "Error: gradlew not found in the project root. Please upload a valid Android project."
+         exit 1
+      fi
+
+      echo "Making gradlew executable..."
+      chmod +x gradlew
+
+      echo "Running ./gradlew assembleDebug..."
+      ./gradlew assembleDebug
+    `;
+
+    const buildProcess = spawn('bash', ['-c', setupScript], {
       cwd: activeProjectRoot,
       env: process.env
     });
 
-    installProcess.stdout.on('data', (data: Buffer) => {
+    buildProcess.stdout.on('data', (data: Buffer) => {
       socket.emit('build:log', data.toString());
     });
 
-    installProcess.stderr.on('data', (data: Buffer) => {
+    buildProcess.stderr.on('data', (data: Buffer) => {
       socket.emit('build:log', data.toString());
     });
 
-    installProcess.on('close', () => {
-      socket.emit('build:log', '\nJava Setup Phase completed. Proceeding to Gradle Check...\n');
-
-      const gradlewPath = path.join(activeProjectRoot, 'gradlew');
-      
-      if (!fs.existsSync(gradlewPath)) {
-        socket.emit('build:log', 'Error: gradlew not found in project root.\n');
-        socket.emit('build:log', 'This environment requires a valid Android project with a Gradle wrapper.\n');
-        socket.emit('build:error', 'gradlew not found');
-        return;
+    buildProcess.on('close', (code) => {
+      if (code === 0) {
+        socket.emit('build:log', '\nBuild completed successfully! APK is ready.\n');
+        socket.emit('build:success');
+      } else {
+        socket.emit('build:log', `\nBuild failed with exit code ${code}.\n`);
+        socket.emit('build:error', `Exit code ${code}`);
       }
-
-      socket.emit('build:log', 'Found gradlew. Making it executable...\n');
-      exec(`chmod +x gradlew`, { cwd: activeProjectRoot }, (err) => {
-        if (err) {
-          socket.emit('build:log', `Failed to chmod: ${err.message}\n`);
-        }
-
-        socket.emit('build:log', 'Running ./gradlew assembleDebug...\n');
-        const buildProcess = spawn('./gradlew', ['assembleDebug'], {
-          cwd: activeProjectRoot,
-          env: process.env
-        });
-
-        buildProcess.stdout.on('data', (data: Buffer) => {
-          socket.emit('build:log', data.toString());
-        });
-
-        buildProcess.stderr.on('data', (data: Buffer) => {
-          socket.emit('build:log', data.toString());
-        });
-
-        buildProcess.on('close', (code) => {
-          if (code === 0) {
-            socket.emit('build:log', '\nBuild completed successfully! APK is ready.\n');
-            socket.emit('build:success');
-          } else {
-            socket.emit('build:log', `\nBuild failed with exit code ${code}.\n`);
-            socket.emit('build:error', `Exit code ${code}`);
-          }
-        });
-      });
     });
   });
 
